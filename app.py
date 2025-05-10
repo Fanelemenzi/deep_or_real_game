@@ -3,6 +3,8 @@ import streamlit_survey as ss
 import os
 import random
 from PIL import Image
+import pandas as pd
+from datetime import datetime
 
 # Initialize the survey with a progress bar
 survey = ss.StreamlitSurvey("Deepfake_Image_Survey")
@@ -10,6 +12,28 @@ survey = ss.StreamlitSurvey("Deepfake_Image_Survey")
 # Initialize session state for survey completion
 if 'survey_completed' not in st.session_state:
     st.session_state.survey_completed = False
+
+# Function to save results to Excel
+def save_to_excel(results):
+    # Create a DataFrame from results
+    df = pd.DataFrame(results)
+    
+    # Add timestamp
+    df['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Define Excel file path
+    excel_path = "survey_results.xlsx"
+    
+    # Check if file exists to append or create new
+    if os.path.exists(excel_path):
+        existing_df = pd.read_excel(excel_path)
+        updated_df = pd.concat([existing_df, df], ignore_index=True)
+    else:
+        updated_df = df
+    
+    # Save to Excel
+    updated_df.to_excel(excel_path, index=False)
+    return excel_path
 
 # Define the on_submit function
 def mark_survey_completed():
@@ -104,7 +128,7 @@ with pages:
         survey.data[f"selection_{pages.current}"] = selection
         survey.data[f"confidence_{pages.current}"] = confidence
 
-#After submission, show results and save to Excel
+# After submission, show results and save to Excel
 if st.session_state.get('survey_completed', False):
     st.header("Survey Results")
     
@@ -146,9 +170,51 @@ if st.session_state.get('survey_completed', False):
     
     # Calculate and display overall accuracy
     accuracy = (correct_count / total_images) * 100
-    st.subheader("Summary Statistics")
+    st.subheader("Your Performance")
     st.metric("Overall Accuracy", f"{accuracy:.1f}%")
     st.metric("Correct Guesses", f"{correct_count}/{total_images}")
+    
+    # Show aggregated results from all participants
+    st.subheader("All Participants' Performance")
+    
+    if os.path.exists(excel_path):
+        # Load all results
+        all_results = pd.read_excel(excel_path)
+        
+        # Calculate statistics for all participants
+        participant_stats = all_results.groupby('timestamp').agg({
+            'Is_Correct': ['sum', 'count', 'mean']
+        }).reset_index()
+        
+        participant_stats.columns = ['Timestamp', 'Correct', 'Total', 'Accuracy']
+        participant_stats['Accuracy'] = participant_stats['Accuracy'] * 100
+        
+        # Format the table
+        participant_stats['Timestamp'] = pd.to_datetime(participant_stats['Timestamp'])
+        participant_stats = participant_stats.sort_values('Timestamp', ascending=False)
+        participant_stats['Accuracy'] = participant_stats['Accuracy'].round(1)
+        
+        # Display the table
+        st.dataframe(
+            participant_stats.style.format({
+                'Accuracy': '{:.1f}%',
+                'Correct': '{:.0f}',
+                'Total': '{:.0f}'
+            }),
+            use_container_width=True
+        )
+        
+        # Show summary statistics
+        st.subheader("Summary Statistics Across All Participants")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Participants", len(participant_stats))
+        with col2:
+            avg_accuracy = participant_stats['Accuracy'].mean()
+            st.metric("Average Accuracy", f"{avg_accuracy:.1f}%")
+        with col3:
+            best_accuracy = participant_stats['Accuracy'].max()
+            st.metric("Best Accuracy", f"{best_accuracy:.1f}%")
     
     # Provide download link for results
     with open(excel_path, "rb") as file:
